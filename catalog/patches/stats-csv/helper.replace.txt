@@ -1,0 +1,11 @@
+    private static void csv(HttpExchange ex, String body) throws IOException {
+        byte[] b = body.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "text/csv; charset=utf-8");
+        ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"stats.csv\"");
+        ex.sendResponseHeaders(200, b.length);
+        try (OutputStream os = ex.getResponseBody()) {
+            os.write(b);
+        }
+    }
+
+    private static void error(HttpExchange ex, int status, String code, String msg) throws IOException {

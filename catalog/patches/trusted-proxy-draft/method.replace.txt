@@ -1,0 +1,9 @@
+    private String clientKey(HttpExchange ex) {
+        String xff = ex.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].trim();
+        }
+        return ex.getRemoteAddress().getAddress().getHostAddress();
+    }
+
+    private void throttle(RateLimiter limiter, String client) {

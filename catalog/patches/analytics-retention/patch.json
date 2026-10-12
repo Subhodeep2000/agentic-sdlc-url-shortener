@@ -1,0 +1,6 @@
+{"name":"analytics-retention","description":"Bounded analytics retention: purge per-day buckets older than a configured number of days",
+ "edits":[
+  {"file":"src/main/java/com/acme/shortener/LinkService.java","findFile":"svc.find.txt","replaceFile":"svc.replace.txt"},
+  {"file":"src/main/java/com/acme/shortener/ShortenerApp.java","findFile":"app.find.txt","replaceFile":"app.replace.txt"}],
+ "create":[
+  {"file":"src/test/java/com/acme/shortener/AnalyticsRetentionTest.java","from":"AnalyticsRetentionTest.java.tmpl"}]}

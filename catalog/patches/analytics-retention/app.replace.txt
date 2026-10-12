@@ -1,0 +1,2 @@
+service.purgeExpired();
+                    service.purgeAnalyticsOlderThan(${retention_days});

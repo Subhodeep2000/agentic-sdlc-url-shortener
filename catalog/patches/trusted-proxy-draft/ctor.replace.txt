@@ -1,0 +1,15 @@
+    private final java.util.Set<String> trustedProxies;
+    private HttpServer server;
+
+    public ShortenerServer(LinkService service, RateLimiter createLimiter, RateLimiter redirectLimiter) {
+        this(service, createLimiter, redirectLimiter, java.util.Set.of());
+    }
+
+    /** {@code trustedProxies}: peer addresses allowed to set X-Forwarded-For; empty means the header is never trusted. */
+    public ShortenerServer(LinkService service, RateLimiter createLimiter, RateLimiter redirectLimiter,
+                           java.util.Set<String> trustedProxies) {
+        this.service = service;
+        this.createLimiter = createLimiter;
+        this.redirectLimiter = redirectLimiter;
+        this.trustedProxies = java.util.Set.copyOf(trustedProxies);
+    }

@@ -1,0 +1,147 @@
+--- a/src/main/java/com/acme/shortener/ShortenerServer.java
++++ b/src/main/java/com/acme/shortener/ShortenerServer.java
+@@
+     private final LinkService service;
+     private final RateLimiter createLimiter;
+     private final RateLimiter redirectLimiter;
++    private final java.util.Set<String> trustedProxies;
+     private HttpServer server;
+ 
+     public ShortenerServer(LinkService service, RateLimiter createLimiter, RateLimiter redirectLimiter) {
++        this(service, createLimiter, redirectLimiter, java.util.Set.of());
++    }
++
++    /** {@code trustedProxies}: peer addresses allowed to set X-Forwarded-For; empty means the header is never trusted. */
++    public ShortenerServer(LinkService service, RateLimiter createLimiter, RateLimiter redirectLimiter,
++                           java.util.Set<String> trustedProxies) {
+         this.service = service;
+         this.createLimiter = createLimiter;
+         this.redirectLimiter = redirectLimiter;
++        this.trustedProxies = java.util.Set.copyOf(trustedProxies);
+     }
+ 
+     public void start(int port) throws IOException {
+@@
+     private void route(HttpExchange ex) throws IOException {
+         String method = ex.getRequestMethod();
+         String path = ex.getRequestURI().getRawPath();
+-        String client = ex.getRemoteAddress().getAddress().getHostAddress();
++        String client = clientKey(ex);
+ 
+         if (path.equals("/health")) {
+             need(method, "GET");
+@@
+         }
+     }
+ 
++    /**
++     * Rate-limit key: the direct peer, unless that peer is a trusted proxy; then the right-most X-Forwarded-For entry
++     * that is not itself a trusted proxy (entries further left are client-controlled and can be forged).
++     */
++    private String clientKey(HttpExchange ex) {
++        String peer = ex.getRemoteAddress().getAddress().getHostAddress();
++        if (!trustedProxies.contains(peer)) {
++            return peer;
++        }
++        String xff = ex.getRequestHeaders().getFirst("X-Forwarded-For");
++        if (xff == null || xff.isBlank()) {
++            return peer;
++        }
++        String[] hops = xff.split(",");
++        for (int i = hops.length - 1; i >= 0; i--) {
++            String hop = hops[i].trim();
++            if (!hop.isEmpty() && !trustedProxies.contains(hop)) {
++                return hop.length() > 64 ? peer : hop;
++            }
++        }
++        return peer;
++    }
++
+     private void throttle(RateLimiter limiter, String client) {
+         if (!limiter.tryAcquire(client)) {
+             throw ShortenerException.tooManyRequests(limiter.retryAfterSeconds());
+--- /dev/null
++++ b/src/test/java/com/acme/shortener/TrustedProxyTest.java
++package com.acme.shortener;
++
++import static com.acme.testkit.Assert.assertEquals;
++
++import com.acme.testkit.Test;
++import java.net.URI;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.time.Clock;
++import java.util.Set;
++
++public class TrustedProxyTest {
++    private static final String BODY = "{\"url\":\"https://example.com/x\"}";
++
++    private static int post(HttpClient http, ShortenerServer server, String xff) throws Exception {
++        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/api/v1/links"))
++                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(BODY));
++        if (xff != null) {
++            b.header("X-Forwarded-For", xff);
++        }
++        return http.send(b.build(), java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode();
++    }
++
++    private static ShortenerServer server(int createCapacity, Set<String> trusted) throws Exception {
++        Clock c = Clock.systemUTC();
++        ShortenerServer s = new ShortenerServer(new LinkService(c, "http://x", 1000), new RateLimiter(createCapacity, 1, c),
++                new RateLimiter(1000, 1000, c), trusted);
++        s.start(0);
++        return s;
++    }
++
++    @Test
++    public void untrustedPeerCannotSpoofItsAddress() throws Exception {
++        ShortenerServer s = server(2, Set.of("10.9.9.9")); // the test client (127.0.0.1) is NOT a trusted proxy
++        try {
++            HttpClient http = HttpClient.newHttpClient();
++            assertEquals(201, post(http, s, "1.1.1.1"));
++            assertEquals(201, post(http, s, "2.2.2.2"));
++            assertEquals(429, post(http, s, "3.3.3.3"), "forged X-Forwarded-For must not buy a fresh rate-limit bucket");
++        } finally {
++            s.stop();
++        }
++    }
++
++    @Test
++    public void trustedProxyGivesEachRealClientItsOwnBucket() throws Exception {
++        ShortenerServer s = server(2, Set.of("127.0.0.1"));
++        try {
++            HttpClient http = HttpClient.newHttpClient();
++            assertEquals(201, post(http, s, "1.1.1.1"));
++            assertEquals(201, post(http, s, "1.1.1.1"));
++            assertEquals(429, post(http, s, "1.1.1.1"));
++            assertEquals(201, post(http, s, "2.2.2.2"), "a different real client is not throttled");
++        } finally {
++            s.stop();
++        }
++    }
++
++    @Test
++    public void onlyTheRightMostUntrustedHopCounts() throws Exception {
++        ShortenerServer s = server(1, Set.of("127.0.0.1"));
++        try {
++            HttpClient http = HttpClient.newHttpClient();
++            assertEquals(201, post(http, s, "6.6.6.6, 1.1.1.1"));
++            assertEquals(429, post(http, s, "7.7.7.7, 1.1.1.1"), "left-hand entries are client-forged and must be ignored");
++        } finally {
++            s.stop();
++        }
++    }
++
++    @Test
++    public void withoutTrustedProxiesBehaviourIsUnchanged() throws Exception {
++        ShortenerServer s = server(1, Set.of());
++        try {
++            HttpClient http = HttpClient.newHttpClient();
++            assertEquals(201, post(http, s, null));
++            assertEquals(429, post(http, s, "9.9.9.9"));
++        } finally {
++            s.stop();
++        }
++    }
++}
++

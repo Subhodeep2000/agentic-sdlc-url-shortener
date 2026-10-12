@@ -1,0 +1,24 @@
+    /**
+     * Rate-limit key: the direct peer, unless that peer is a trusted proxy; then the right-most X-Forwarded-For entry
+     * that is not itself a trusted proxy (entries further left are client-controlled and can be forged).
+     */
+    private String clientKey(HttpExchange ex) {
+        String peer = ex.getRemoteAddress().getAddress().getHostAddress();
+        if (!trustedProxies.contains(peer)) {
+            return peer;
+        }
+        String xff = ex.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (xff == null || xff.isBlank()) {
+            return peer;
+        }
+        String[] hops = xff.split(",");
+        for (int i = hops.length - 1; i >= 0; i--) {
+            String hop = hops[i].trim();
+            if (!hop.isEmpty() && !trustedProxies.contains(hop)) {
+                return hop.length() > 64 ? peer : hop;
+            }
+        }
+        return peer;
+    }
+
+    private void throttle(RateLimiter limiter, String client) {

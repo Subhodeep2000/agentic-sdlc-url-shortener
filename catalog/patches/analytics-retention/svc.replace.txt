@@ -1,0 +1,21 @@
+    /**
+     * Drops per-day analytics buckets older than {@code retentionDays}; totals and referrer counts are aggregates and
+     * are kept. Keys are ISO dates, so lexicographic order is chronological.
+     */
+    public synchronized int purgeAnalyticsOlderThan(int retentionDays) {
+        if (retentionDays < 1) {
+            throw new IllegalArgumentException("retentionDays must be >= 1");
+        }
+        String cutoff = clock.instant().atZone(ZoneOffset.UTC).toLocalDate().minusDays(retentionDays).toString();
+        int dropped = 0;
+        for (Counters c : counters.values()) {
+            synchronized (c) {
+                int before = c.perDay.size();
+                c.perDay.headMap(cutoff).clear();
+                dropped += before - c.perDay.size();
+            }
+        }
+        return dropped;
+    }
+
+    public int size() {

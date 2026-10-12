@@ -1,0 +1,44 @@
+{
+ "patches": [
+  {
+   "name": "stats-csv",
+   "triggers": [
+    "export"
+   ],
+   "params": [],
+   "summary": "Add GET /api/v1/links/{code}/stats.csv with CSV-injection protection",
+   "tradeoffs": [
+    "CSV is generated in memory per request: fine for per-link stats (bounded by 50 referrers and daily buckets) but not for bulk export",
+    "Formula neutralisation prefixes a quote, which alters the visible text of hostile cells instead of rejecting them"
+   ]
+  },
+  {
+   "name": "trusted-proxy",
+   "triggers": [
+    "proxy",
+    "client-ip"
+   ],
+   "params": [],
+   "summary": "Rate-limit by real client IP behind a configured trusted proxy; never trust X-Forwarded-For from untrusted peers",
+   "tradeoffs": [
+    "Trust is configured by exact peer address; CIDR ranges and the standard Forwarded header are not supported",
+    "Right-most-untrusted-hop parsing assumes the proxy appends to X-Forwarded-For (standard behaviour); a proxy that overwrites it needs the same config"
+   ]
+  },
+  {
+   "name": "analytics-retention",
+   "triggers": [
+    "privacy",
+    "analytics"
+   ],
+   "params": [
+    "retention_days"
+   ],
+   "summary": "Purge per-day analytics older than a retention period, scheduled with the existing housekeeping loop",
+   "tradeoffs": [
+    "Retention drops per-day buckets only; totals and referrer counts are aggregates and are kept indefinitely",
+    "Purge runs in the existing 60 s housekeeping loop: eventual, not instant, deletion"
+   ]
+  }
+ ]
+}

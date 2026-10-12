@@ -1,0 +1,7 @@
+{"name":"trusted-proxy-draft","description":"Per-client rate limiting behind a load balancer using X-Forwarded-For",
+ "edits":[
+  {"file":"src/main/java/com/acme/shortener/ShortenerServer.java","findFile":"ctor.find.txt","replaceFile":"ctor.replace.txt"},
+  {"file":"src/main/java/com/acme/shortener/ShortenerServer.java","findFile":"client.find.txt","replaceFile":"client.replace.txt"},
+  {"file":"src/main/java/com/acme/shortener/ShortenerServer.java","findFile":"method.find.txt","replaceFile":"method.replace.txt"}],
+ "create":[
+  {"file":"src/test/java/com/acme/shortener/TrustedProxyTest.java","from":"../trusted-proxy/TrustedProxyTest.java.tmpl"}]}

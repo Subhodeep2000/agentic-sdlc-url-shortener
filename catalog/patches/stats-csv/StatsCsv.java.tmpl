@@ -1,0 +1,35 @@
+package com.acme.shortener;
+
+/**
+ * CSV rendering of link analytics. Text cells that start with a formula trigger (= + - @ tab CR) are prefixed with a
+ * single quote so spreadsheet software shows them as text instead of evaluating them (OWASP CSV injection).
+ *
+ * @concepts export csv analytics stats security
+ */
+public final class StatsCsv {
+    private StatsCsv() {
+    }
+
+    public static String render(LinkService.Stats s) {
+        StringBuilder sb = new StringBuilder("section,key,count\r\n");
+        row(sb, "total", "all", s.totalClicks());
+        s.clicksPerDay().forEach((day, n) -> row(sb, "day", day, n));
+        s.referrers().forEach((host, n) -> row(sb, "referrer", host, n));
+        return sb.toString();
+    }
+
+    private static void row(StringBuilder sb, String section, String key, long count) {
+        sb.append(cell(section)).append(',').append(cell(key)).append(',').append(count).append("\r\n");
+    }
+
+    static String cell(String value) {
+        String v = value;
+        if (!v.isEmpty() && "=+-@\t\r".indexOf(v.charAt(0)) >= 0) {
+            v = "'" + v;
+        }
+        if (v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0) {
+            v = "\"" + v.replace("\"", "\"\"") + "\"";
+        }
+        return v;
+    }
+}

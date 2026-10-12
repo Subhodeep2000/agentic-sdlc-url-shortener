@@ -1,0 +1,7 @@
+    private HttpServer server;
+
+    public ShortenerServer(LinkService service, RateLimiter createLimiter, RateLimiter redirectLimiter) {
+        this.service = service;
+        this.createLimiter = createLimiter;
+        this.redirectLimiter = redirectLimiter;
+    }

@@ -1,0 +1,126 @@
+--- a/src/main/java/com/acme/shortener/ShortenerServer.java
++++ b/src/main/java/com/acme/shortener/ShortenerServer.java
+@@
+             } else if (parts.length == 1 && method.equals("DELETE")) {
+                 service.delete(code);
+                 ex.sendResponseHeaders(204, -1);
++            } else if (parts.length == 2 && parts[1].equals("stats.csv")) {
++                need(method, "GET");
++                csv(ex, StatsCsv.render(service.stats(code)));
+             } else if (parts.length == 2 && parts[1].equals("stats")) {
+                 need(method, "GET");
+                 json(ex, 200, statsView(service.stats(code)));
+@@
+         return m;
+     }
+ 
++    private static void csv(HttpExchange ex, String body) throws IOException {
++        byte[] b = body.getBytes(StandardCharsets.UTF_8);
++        ex.getResponseHeaders().set("Content-Type", "text/csv; charset=utf-8");
++        ex.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"stats.csv\"");
++        ex.sendResponseHeaders(200, b.length);
++        try (OutputStream os = ex.getResponseBody()) {
++            os.write(b);
++        }
++    }
++
+     private static void error(HttpExchange ex, int status, String code, String msg) throws IOException {
+         json(ex, status, Map.of("error", Map.of("code", code, "message", msg)));
+     }
+--- /dev/null
++++ b/src/main/java/com/acme/shortener/StatsCsv.java
++package com.acme.shortener;
++
++/**
++ * CSV rendering of link analytics. Text cells that start with a formula trigger (= + - @ tab CR) are prefixed with a
++ * single quote so spreadsheet software shows them as text instead of evaluating them (OWASP CSV injection).
++ *
++ * @concepts export csv analytics stats security
++ */
++public final class StatsCsv {
++    private StatsCsv() {
++    }
++
++    public static String render(LinkService.Stats s) {
++        StringBuilder sb = new StringBuilder("section,key,count\r\n");
++        row(sb, "total", "all", s.totalClicks());
++        s.clicksPerDay().forEach((day, n) -> row(sb, "day", day, n));
++        s.referrers().forEach((host, n) -> row(sb, "referrer", host, n));
++        return sb.toString();
++    }
++
++    private static void row(StringBuilder sb, String section, String key, long count) {
++        sb.append(cell(section)).append(',').append(cell(key)).append(',').append(count).append("\r\n");
++    }
++
++    static String cell(String value) {
++        String v = value;
++        if (!v.isEmpty() && "=+-@\t\r".indexOf(v.charAt(0)) >= 0) {
++            v = "'" + v;
++        }
++        if (v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0) {
++            v = "\"" + v.replace("\"", "\"\"") + "\"";
++        }
++        return v;
++    }
++}
++
+--- /dev/null
++++ b/src/test/java/com/acme/shortener/StatsCsvTest.java
++package com.acme.shortener;
++
++import static com.acme.testkit.Assert.assertEquals;
++import static com.acme.testkit.Assert.assertTrue;
++
++import com.acme.testkit.Test;
++import java.net.URI;
++import java.net.http.HttpClient;
++import java.net.http.HttpRequest;
++import java.net.http.HttpResponse;
++import java.time.Clock;
++import java.util.Map;
++
++public class StatsCsvTest {
++
++    @Test
++    public void neutralisesFormulaTriggersAndQuotesSpecials() {
++        assertEquals("'=1+1", StatsCsv.cell("=1+1"));
++        assertEquals("'+cmd", StatsCsv.cell("+cmd"));
++        assertEquals("'-2", StatsCsv.cell("-2"));
++        assertEquals("'@SUM(A1)", StatsCsv.cell("@SUM(A1)"));
++        assertEquals("\"a,b\"", StatsCsv.cell("a,b"));
++        assertEquals("\"say \"\"hi\"\"\"", StatsCsv.cell("say \"hi\""));
++        assertEquals("plain.example.com", StatsCsv.cell("plain.example.com"));
++    }
++
++    @Test
++    public void rendersTotalDayAndReferrerRows() {
++        LinkService.Stats s = new LinkService.Stats("c", 3, null, Map.of("2026-03-01", 3L), Map.of("=evil", 2L, "ok.com", 1L));
++        String csv = StatsCsv.render(s);
++        assertTrue(csv.startsWith("section,key,count\r\n"), csv);
++        assertTrue(csv.contains("total,all,3\r\n"), csv);
++        assertTrue(csv.contains("day,2026-03-01,3\r\n"), csv);
++        assertTrue(csv.contains("referrer,'=evil,2\r\n"), csv);
++    }
++
++    @Test
++    public void httpEndpointServesCsv() throws Exception {
++        Clock clock = Clock.systemUTC();
++        LinkService svc = new LinkService(clock, "http://x", 100);
++        svc.create("https://example.com/p", "csv-link", null);
++        svc.resolve("csv-link", "https://ref.example.org/a");
++        ShortenerServer server = new ShortenerServer(svc, new RateLimiter(10, 10, clock), new RateLimiter(10, 10, clock));
++        server.start(0);
++        try {
++            HttpResponse<String> r = HttpClient.newHttpClient().send(HttpRequest.newBuilder(
++                    URI.create("http://127.0.0.1:" + server.port() + "/api/v1/links/csv-link/stats.csv")).build(),
++                    HttpResponse.BodyHandlers.ofString());
++            assertEquals(200, r.statusCode());
++            assertTrue(r.headers().firstValue("Content-Type").orElse("").startsWith("text/csv"), "content type");
++            assertTrue(r.body().contains("referrer,ref.example.org,1"), r.body());
++        } finally {
++            server.stop();
++        }
++    }
++}
++

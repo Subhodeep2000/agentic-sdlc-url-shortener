@@ -1,0 +1,80 @@
+--- a/src/main/java/com/acme/shortener/LinkService.java
++++ b/src/main/java/com/acme/shortener/LinkService.java
+@@
+         return n;
+     }
+ 
++    /**
++     * Drops per-day analytics buckets older than {@code retentionDays}; totals and referrer counts are aggregates and
++     * are kept. Keys are ISO dates, so lexicographic order is chronological.
++     */
++    public synchronized int purgeAnalyticsOlderThan(int retentionDays) {
++        if (retentionDays < 1) {
++            throw new IllegalArgumentException("retentionDays must be >= 1");
++        }
++        String cutoff = clock.instant().atZone(ZoneOffset.UTC).toLocalDate().minusDays(retentionDays).toString();
++        int dropped = 0;
++        for (Counters c : counters.values()) {
++            synchronized (c) {
++                int before = c.perDay.size();
++                c.perDay.headMap(cutoff).clear();
++                dropped += before - c.perDay.size();
++            }
++        }
++        return dropped;
++    }
++
+     public int size() {
+         return links.size();
+     }
+--- a/src/main/java/com/acme/shortener/ShortenerApp.java
++++ b/src/main/java/com/acme/shortener/ShortenerApp.java
+@@
+                 try {
+                     Thread.sleep(60_000);
+                     service.purgeExpired();
++                    service.purgeAnalyticsOlderThan(14);
+                 } catch (InterruptedException e) {
+                     return;
+                 }
+--- /dev/null
++++ b/src/test/java/com/acme/shortener/AnalyticsRetentionTest.java
++package com.acme.shortener;
++
++import static com.acme.testkit.Assert.assertEquals;
++import static com.acme.testkit.Assert.assertThrows;
++
++import com.acme.testkit.MutableClock;
++import com.acme.testkit.Test;
++import java.time.Duration;
++import java.time.Instant;
++
++public class AnalyticsRetentionTest {
++
++    @Test
++    public void dropsOldDailyBucketsButKeepsAggregates() {
++        MutableClock clock = new MutableClock(Instant.parse("2026-03-01T10:00:00Z"));
++        LinkService svc = new LinkService(clock, "http://x", 10);
++        LinkService.Link l = svc.create("https://example.com", null, null);
++        svc.resolve(l.code(), "https://a.example.org/");
++        clock.advance(Duration.ofDays(10));
++        svc.resolve(l.code(), "https://b.example.org/");
++        assertEquals(1, svc.purgeAnalyticsOlderThan(7), "the 10-day-old bucket is dropped");
++        LinkService.Stats s = svc.stats(l.code());
++        assertEquals(1, s.clicksPerDay().size());
++        assertEquals(2L, s.totalClicks(), "totals are aggregates and survive");
++        assertEquals(2, s.referrers().size());
++    }
++
++    @Test
++    public void nothingDroppedWithinRetentionAndBadInputRejected() {
++        MutableClock clock = new MutableClock(Instant.parse("2026-03-01T10:00:00Z"));
++        LinkService svc = new LinkService(clock, "http://x", 10);
++        LinkService.Link l = svc.create("https://example.com", null, null);
++        svc.resolve(l.code(), null);
++        clock.advance(Duration.ofDays(5));
++        assertEquals(0, svc.purgeAnalyticsOlderThan(30));
++        assertThrows(IllegalArgumentException.class, () -> svc.purgeAnalyticsOlderThan(0));
++    }
++}
++

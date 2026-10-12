@@ -1,0 +1,7 @@
+{"name":"stats-csv","description":"CSV export of link analytics with spreadsheet formula-injection protection",
+ "edits":[
+  {"file":"src/main/java/com/acme/shortener/ShortenerServer.java","findFile":"route.find.txt","replaceFile":"route.replace.txt"},
+  {"file":"src/main/java/com/acme/shortener/ShortenerServer.java","findFile":"helper.find.txt","replaceFile":"helper.replace.txt"}],
+ "create":[
+  {"file":"src/main/java/com/acme/shortener/StatsCsv.java","from":"StatsCsv.java.tmpl"},
+  {"file":"src/test/java/com/acme/shortener/StatsCsvTest.java","from":"StatsCsvTest.java.tmpl"}]}
